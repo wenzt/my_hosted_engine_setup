@@ -1,0 +1,104 @@
+#!/bin/sh
+#
+# ovirt-hosted-engine-setup -- ovirt hosted engine setup
+# Copyright (C) 2013-2017 Red Hat, Inc.
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+#
+
+die() {
+	local m="$1"
+	echo "FATAL: ${m}" >&2
+	exit 1
+}
+
+usage() {
+	cat << __EOF__
+Usage: $0
+	--config-append=file
+		Load extra configuration files.
+	--generate-answer=file
+		Generate answer file.
+	--upgrade-appliance
+		Upgrade the engine-appliance
+	--rollback-upgrade
+		Rollback using a backup saved in a previous upgrade attempt.
+	--ansible
+		Deploy using node-zero ansible flow (default)
+	--noansible
+		Deploy using deprecated python
+
+__EOF__
+	exit 1
+}
+
+environment=
+
+plugingroups="gr-he-common:gr-he-ansiblesetup"
+
+ansible_noansible=
+
+while [ -n "$1" ]; do
+	x="$1"
+	v="${x#*=}"
+	shift
+	case "${x}" in
+		--otopi-environment=*)
+			otopienv="${v}"
+		;;
+		--config-append=*)
+			environment="${environment} APPEND:CORE/configFileAppend=str:${v}"
+		;;
+		--generate-answer=*)
+			environment="${environment} OVEHOSTED_CORE/userAnswerFile=str:${v}"
+		;;
+		--help)
+			usage
+		;;
+		--upgrade-appliance)
+			plugingroups="gr-he-common:gr-he-upgradeappliance"
+		;;
+		--rollback-upgrade)
+			plugingroups="gr-he-common:gr-he-rollbackupgrade"
+		;;
+		--ansible)
+			if [ ! -z $ansible_noansible ]; then
+				die "--ansible and --noansible are alternative"
+			fi
+			ansible_noansible="ansible"
+			plugingroups="gr-he-common:gr-he-ansiblesetup"
+		;;
+		--noansible)
+			if [ ! -z $ansible_noansible ]; then
+				die "--ansible and --noansible are alternative"
+			fi
+			ansible_noansible="noansible"
+			plugingroups="gr-he-common:gr-he-setup"
+		;;
+		*)
+			die "Invalid option '${x}'"
+		;;
+	esac
+done
+
+script="$(readlink -f "$0")"
+scriptdir="$(dirname "${script}")"
+if [ ! -f "${scriptdir}/ovirt-hosted-engine-setup.env" ]; then
+	#FIXME: must be configured by configure.ac
+	scriptdir=/usr/share/ovirt-hosted-engine-setup/scripts
+fi
+. "${scriptdir}/ovirt-hosted-engine-setup.env"
+baseenv="APPEND:BASE/pluginPath=str:${scriptdir}/../plugins APPEND:BASE/pluginGroups=str:${plugingroups}"
+exec "${otopidir}/otopi" "${baseenv} ${environment} ${otopienv}"

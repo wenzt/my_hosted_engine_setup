@@ -1,0 +1,130 @@
+---
+- name: Create hosted engine local vm
+  hosts: localhost
+  connection: local
+  tasks:
+  - include_tasks: auth_sso.yml
+  - name: Fetch host facts
+    ovirt_hosts_facts:
+      pattern: name={{ HOST_NAME }}
+      auth: "{{ ovirt_auth }}"
+    register: host_result
+    until: host_result and 'ansible_facts' in host_result and 'ovirt_hosts' in host_result.ansible_facts and host_result.ansible_facts.ovirt_hosts|length >= 1 and 'up' in host_result.ansible_facts.ovirt_hosts[0].status
+    retries: 50
+    delay: 10
+  - debug: var=host_result
+  - name: Fetch cluster id
+    set_fact: cluster_id="{{ host_result.ansible_facts.ovirt_hosts[0].cluster.id }}"
+  - name: Fetch cluster facts
+    ovirt_cluster_facts:
+      auth: "{{ ovirt_auth }}"
+    register: cluster_facts
+  - debug: var=cluster_facts
+  - name: Fetch datacenter facts
+    ovirt_datacenter_facts:
+      auth: "{{ ovirt_auth }}"
+    register: datacenter_facts
+  - debug: var=datacenter_facts
+  - name: Fetch datacenter id
+    set_fact: datacenter_id={{ ovirt_clusters|json_query("[?id=='" + cluster_id + "'].data_center.id")|first }}
+  - name: Fetch datacenter_name
+    set_fact: datacenter_name={{ ovirt_datacenters|json_query("[?id=='" + datacenter_id + "'].name")|first }}
+  - name: Add nfs storage domain
+    ovirt_storage_domains:
+      name: "{{ STORAGE_DOMAIN_NAME }}"
+      host: "{{ HOST_NAME }}"
+      data_center: "{{ datacenter_name }}"
+      wait: True
+      nfs:
+        address: "{{ STORAGE_DOMAIN_ADDR }}"
+        path: "{{ STORAGE_DOMAIN_PATH }}"
+        mount_options: "{{ MOUNT_OPTIONS }}"
+        version: "{{ NFS_VERSION }}"
+      auth: "{{ ovirt_auth }}"
+    when: DOMAIN_TYPE == "nfs"
+    register: otopi_storage_domain_details
+  - name: Add glusterfs storage domain
+    ovirt_storage_domains:
+      name: "{{ STORAGE_DOMAIN_NAME }}"
+      host: "{{ HOST_NAME }}"
+      data_center: "{{ datacenter_name }}"
+      wait: True
+      glusterfs:
+        address: "{{ STORAGE_DOMAIN_ADDR }}"
+        path: "{{ STORAGE_DOMAIN_PATH }}"
+        mount_options: "{{ MOUNT_OPTIONS }}"
+      auth:
+        username: admin@internal
+        password: "{{ ADMIN_PASSWORD }}"
+        url: https://{{ FQDN }}/tchyp-engine/api
+        insecure: true
+    when: DOMAIN_TYPE == "glusterfs"
+    register: otopi_storage_domain_details
+  - name: Add iSCSI storage domain
+    ovirt_storage_domains:
+      name: "{{ STORAGE_DOMAIN_NAME }}"
+      host: "{{ HOST_NAME }}"
+      data_center: "{{ datacenter_name }}"
+      wait: True
+      discard_after_delete: "{{ DISCARD }}"
+      # we are sending a single iSCSI path but, not sure if intended or if
+      # it's bug, the engine is implicitly creating the storage domain
+      # consuming all the path that are already connected on the host (we
+      # cannot logout since there is not logout command in the rest API, see
+      # https://bugzilla.redhat.com/show_bug.cgi?id=1535951 ).
+      iscsi:
+        address: "{{ STORAGE_DOMAIN_ADDR.split(',')|first }}"
+        port: "{{ ISCSI_PORT.split(',')|first }}"
+        target: "{{ ISCSI_TARGET }}"
+        lun_id: "{{ LUN_ID }}"
+        username: "{{ ISCSI_USERNAME }}"
+        password: "{{ ISCSI_PASSWORD }}"
+      auth: "{{ ovirt_auth }}"
+    when: DOMAIN_TYPE == "iscsi"
+    register: otopi_storage_domain_details
+  - name: Add FC storage domain
+    ovirt_storage_domains:
+      name: "{{ STORAGE_DOMAIN_NAME }}"
+      host: "{{ HOST_NAME }}"
+      data_center: "{{ datacenter_name }}"
+      wait: True
+      discard_after_delete: "{{ DISCARD }}"
+      fcp:
+        lun_id: "{{ LUN_ID }}"
+      auth: "{{ ovirt_auth }}"
+    register: otopi_storage_domain_details
+    when: DOMAIN_TYPE == "fc"
+  - name: Get storage domain details
+    ovirt_storage_domains_facts:
+      pattern: name={{ STORAGE_DOMAIN_NAME }} and datacenter={{ datacenter_name }}
+      auth: "{{ ovirt_auth }}"
+    register: storage_domain_details
+  - debug: var=storage_domain_details
+  - name: Find the appliance OVF
+    find:
+      paths: "{{ LOCAL_VM_DIR }}/master"
+      recurse: true
+      patterns: ^.*.(?<!meta).ovf$
+      use_regex: true
+    register: app_ovf
+  - debug: var=app_ovf
+  - name: parse OVF
+    xml:
+      path: "{{ app_ovf.files[0].path }}"
+      xpath: /ovf:Envelope/Section/Disk
+      namespaces:
+        ovf: http://schemas.dmtf.org/ovf/envelope/1/
+        rasd: http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData
+        vssd: http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_VirtualSystemSettingData
+        xsi: http://www.w3.org/2001/XMLSchema-instance
+      content: attribute
+      attribute: size
+    register: disk_size_xml
+  - name: Get required size
+    set_fact: required_size="{{ disk_size_xml.matches[0].Disk['{http://schemas.dmtf.org/ovf/envelope/1/}size']|int * 1024 * 1024 * 1024 + 3 * 1024 * 1024 * 1024}}"
+  - debug: var=required_size
+  - name: Check storage domain free space
+    fail:
+      msg: "Error: the target storage domain contains only {{ storage_domain_details.ansible_facts.ovirt_storage_domains[0].available|int / 1024 /1024 }}Mb of available space while a minimum of {{ required_size|int / 1024 /1024 }}Mb is required"
+    when: storage_domain_details.ansible_facts.ovirt_storage_domains[0].available|int <= required_size|int
+...

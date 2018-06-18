@@ -1,0 +1,13 @@
+---
+- name: Obtain SSO token using username/password credentials
+  # TODO: remove library/ovirt_auth.py when Ansible 2.5 is out explicitly requiring it
+  environment:
+    OVIRT_URL: https://{{ FQDN }}/tchyp-engine/api
+    OVIRT_USERNAME: admin@internal
+    OVIRT_PASSWORD: "{{ ADMIN_PASSWORD }}"
+  ovirt_auth:
+    insecure: true
+  register: ovirt_sso_auth
+  until: ovirt_sso_auth|succeeded
+  retries: 50
+  delay: 10

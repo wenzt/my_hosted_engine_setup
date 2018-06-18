@@ -1,0 +1,49 @@
+---
+- name: Network interfaces
+  hosts: localhost
+  connection: local
+  tasks:
+  - name: Get all active network interfaces
+    vars:
+      acceptable_bond_modes: ['active-backup','balance-xor','broadcast','802.3adq']
+    set_fact:
+      otopi_net_host="{{ item }}"
+      type="{{ hostvars[inventory_hostname]['ansible_' + item]['type'] }}"
+      bond_valid_name="{{ item | regex_search('(^bond[0-9]+)') }}"
+    when: (
+        (
+          item != 'lo'
+        ) and (
+          hostvars[inventory_hostname]['ansible_' + item]['active']
+        ) and (
+          hostvars[inventory_hostname]['ansible_' + item]['type'] != 'bridge'
+        ) and (
+          (
+            hostvars[inventory_hostname]['ansible_' + item]['ipv4'] is defined
+          ) or (
+            hostvars[inventory_hostname]['ansible_' + item]['ipv6'] is defined
+          ) or (
+            (
+              hostvars[inventory_hostname]['ansible_' + item]['type'] == 'bonding'
+            ) and (
+              hostvars[inventory_hostname]['ansible_' + item]['slaves'][0] is defined
+            ) and (
+               hostvars[inventory_hostname]['ansible_' + item]['mode'] in acceptable_bond_modes
+            )
+          )
+        )
+      )
+    with_items:
+      - "{{ ansible_interfaces | map('replace', '-','_') | list }}"
+    register: valid_network_interfaces
+  - debug: var=valid_network_interfaces
+  - name: filter bonds with bad naming
+    set_fact:
+      net_iface="{{ item }}"
+    when:
+      not 'skipped' in item and ((item['ansible_facts']['type']  == 'ether') or ( (item['ansible_facts']['type'] == 'bonding') and (item['ansible_facts']['bond_valid_name'] != '')))
+    with_items:
+      - "{{ valid_network_interfaces['results'] }}"
+    register: otopi_host_net
+  - debug: var=otopi_host_net
+...
