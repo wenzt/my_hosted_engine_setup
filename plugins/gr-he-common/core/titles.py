@@ -45,6 +45,19 @@ class Plugin(plugin.PluginBase):
         self.dialog.note(
             text='\n--== %s ==--\n\n' % text,
         )
+# #wenzt
+#     @plugin.event(
+#         stage=plugin.Stages.STAGE_CUSTOMIZATION,
+#         name=ohostedcons.Stages.DIALOG_TITLES_S_HOSTNETWORK,
+#         before=(
+#             ohostedcons.Stages.DIALOG_TITLES_E_HOSTNETWORK,
+#         )
+#     )
+#     def _network_start(self):
+#         self._title(
+#             text=_('HOST NETWORK CONFIGURATION'),
+#         )
+# #wenzt
 
     @plugin.event(
         stage=plugin.Stages.STAGE_CUSTOMIZATION,

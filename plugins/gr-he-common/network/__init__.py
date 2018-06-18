@@ -25,12 +25,12 @@ from otopi import util
 
 from . import bridge
 from . import gateway
-
+from . import host_network
 
 @util.export
 def createPlugins(context):
     bridge.Plugin(context=context)
     gateway.Plugin(context=context)
-
+    host_network.Plugin(context=context)
 
 # vim: expandtab tabstop=4 shiftwidth=4
